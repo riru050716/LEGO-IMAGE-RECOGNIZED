@@ -1,0 +1,14 @@
+lego_project/              <-- VS Codeで開くルートフォルダ
+├── dataset/
+│   ├── train/
+│   │   ├── images/
+│   │   └── labels/
+│   ├── valid/
+│   │   ├── images/
+│   │   └── labels/
+│   ├── test/              (任意)
+│   │   ├── images/
+│   │   └── labels/
+│   └── data.yaml          <-- 添付されたファイルを配置
+├── train.py               <-- 今回作成する学習スクリプト
+└── venv/                  <-- Python仮想環境
