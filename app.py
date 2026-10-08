@@ -19,13 +19,26 @@ except Exception as e:
     st.error("モデルファイル 'best.pt' が見つかりません。プロジェクト直下に配置してください。")
     st.stop()
 
-# 画像アップロード（スマホのカメラ撮影対応）
-uploaded_file = st.file_uploader("パーツの写真をえらぶ", type=["jpg", "jpeg", "png"])
+# --- 入力方法の選択 ---
+input_type = st.radio(
+    "画像の準備方法を選んでください",
+    ["📷 直接カメラで撮影", "📁 ファイルから選択"],
+    horizontal=True
+)
 
-if uploaded_file is not None:
-    # アップロード画像表示
-    image = Image.open(uploaded_file)
-    st.image(image, caption="アップロード画像", use_container_width=True)
+input_image_file = None
+
+if input_type == "📷 直接カメラで撮影":
+    # ブラウザ/スマホのカメラで直接撮影
+    input_image_file = st.camera_input("パーツを画面枠に収めて撮影してください")
+else:
+    # フォルダからの選択（従来の機能）
+    input_image_file = st.file_uploader("パーツの写真をえらぶ", type=["jpg", "jpeg", "png"])
+
+# 画像が準備された場合の処理
+if input_image_file is not None:
+    image = Image.open(input_image_file)
+    st.image(image, caption="対象画像", use_container_width=True)
 
     if st.button("パーツを識別・カウント", type="primary"):
         with st.spinner("AIでパーツを検出中..."):
