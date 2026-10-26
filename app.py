@@ -1,7 +1,6 @@
 import streamlit as st
 from ultralytics import YOLO
-from PIL import Image, ImageDraw, ImageEnhance
-import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 # 画面設定
 st.set_page_config(page_title="LEGO SPIKE パーツカウンター", page_icon="🧩", layout="centered")
@@ -46,19 +45,17 @@ if input_type == "📷 直接カメラで撮影":
 else:
     input_image_file = st.file_uploader("パーツの写真をえらぶ", type=["jpg", "jpeg", "png"])
 
-# 画像処理・描画関数
+# カスタム描画関数
 def draw_custom_boxes(image_pil, boxes, names):
-    # 元画像の複製（RGBA変換）
-    img = image_pil.convert("RGBA")
-    
-    # 未確定パーツ（75%未満）を明るく強調するためのベース画像
-    bright_base = ImageEnhance.Brightness(img.convert("RGB")).enhance(1.3).convert("RGBA")
-    
-    # 描画レイヤー作成
+    img = image_pil.convert("RGB")
     draw = ImageDraw.Draw(img)
-    
-    high_conf_counts = {}
-    low_conf_counts = {}
+    counts = {}
+
+    # デフォルトフォントの設定（小さめのサイズ）
+    try:
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
 
     for box in boxes:
         cls_id = int(box.cls[0])
@@ -71,20 +68,23 @@ def draw_custom_boxes(image_pil, boxes, names):
         # 座標の取得 (x1, y1, x2, y2)
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         
-        if conf >= 0.75:
-            # 【信頼度 75% 以上】太い実線枠で明確に囲む
-            draw.rectangle([x1, y1, x2, y2], outline=color, width=4)
-            high_conf_counts[class_name] = high_conf_counts.get(class_name, 0) + 1
+        if conf >= 0.60:
+            # 【信頼度 60% 以上】文字なし・枠線のみ描画
+            draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+            counts[class_name] = counts.get(class_name, 0) + 1
         else:
-            # 【信頼度 75% 未満】明るく表示 ＋ 細い枠線
-            crop_bright = bright_base.crop((x1, y1, x2, y2))
-            img.paste(crop_bright, (x1, y1))
-            
-            # 明るくした領域に細い枠を描画
+            # 【信頼度 60% 未満】細い枠線 ＋ 信頼度数値（例: 58%）を表示
             draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
-            low_conf_counts[class_name] = low_conf_counts.get(class_name, 0) + 1
+            
+            # 信頼度ラベルテキストの作成
+            conf_str = f"{int(conf * 100)}%"
+            
+            # テキストの背景ラベルを描画（見やすさ確保）
+            text_pos = (x1, max(0, y1 - 14))
+            draw.rectangle([text_pos[0], text_pos[1], text_pos[0] + 32, text_pos[1] + 12], fill=color)
+            draw.text((text_pos[0] + 2, text_pos[1]), conf_str, fill=(255, 255, 255), font=font)
 
-    return img.convert("RGB"), high_conf_counts, low_conf_counts
+    return img, counts
 
 # 画像が準備された場合の処理
 if input_image_file is not None:
@@ -93,48 +93,33 @@ if input_image_file is not None:
 
     if st.button("パーツを識別・カウント", type="primary"):
         with st.spinner("AIでパーツを検出中..."):
-            # 推論実行（低信頼度の検出も保持して後から色分けるため conf=0.25）
+            # 推論実行（60%未満の候補を表示・判別するため conf=0.25 で検出）
             results = model(image, conf=0.25, iou=0.5)[0]
 
-            # カスタム枠描画処理
-            res_image, high_counts, low_counts = draw_custom_boxes(image, results.boxes, model.names)
+            # カスタム描画処理
+            res_image, counts = draw_custom_boxes(image, results.boxes, model.names)
             
-            # 結果画像描画・表示
-            st.image(res_image, caption="検出結果（枠線カラー識別）", use_container_width=True)
+            # 結果画像表示
+            st.image(res_image, caption="検出結果（60%未満は信頼度%を印字）", use_container_width=True)
 
             # 結果画面表示
             st.markdown("---")
             st.subheader("📊 集計結果")
-            
-            total_high = sum(high_counts.values())
-            total_low = sum(low_counts.values())
-            
-            st.metric("確定パーツ数 (信頼度 75%以上)", f"{total_high} 個")
-            if total_low > 0:
-                st.caption(f"※ 信頼度75%未満の候補パーツ: {total_low} 個（画像上で明るく表示）")
+            st.metric("合計パーツ数 (信頼度 60%以上)", f"{sum(counts.values())} 個")
 
             # 各クラスの表示（色付きバッジ風）
-            if high_counts or low_counts:
+            if counts:
                 st.markdown("### 🏷️ 検出内訳（クラス別カラー）")
-                
-                # 検出されたすべてのクラス名を取得
-                all_classes = sorted(list(set(high_counts.keys()) | set(low_counts.keys())))
-                
-                for cls in all_classes:
-                    high_num = high_counts.get(cls, 0)
-                    low_num = low_counts.get(cls, 0)
-                    
-                    rgb = CLASS_COLORS.get(cls, DEFAULT_COLOR)
+                for name, count in sorted(counts.items(), key=lambda x: x[1], reverse=True):
+                    rgb = CLASS_COLORS.get(name, DEFAULT_COLOR)
                     hex_color = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
                     
-                    # カラーマークと個数の書き出し
                     st.markdown(
                         f"<div style='display: flex; align-items: center; margin-bottom: 6px;'>"
                         f"<span style='background-color: {hex_color}; width: 14px; height: 14px; display: inline-block; border-radius: 3px; margin-right: 8px;'></span>"
-                        f"<b>{cls}</b>: <span style='font-size: 1.1em; font-weight: bold; margin-left: 6px;'>{high_num} 個</span>"
-                        f"{f' <span style=\"color: #888;\">（※候補: {low_num}個）</span>' if low_num > 0 else ''}"
+                        f"<b>{name}</b>: <span style='font-size: 1.1em; font-weight: bold; margin-left: 6px;'>{count} 個</span>"
                         f"</div>",
                         unsafe_allow_html=True
                     )
             else:
-                st.warning("パーツが検出されませんでした。")
+                st.warning("パーツが検出されませんでした（またはすべて信頼度60%未満です）。")
